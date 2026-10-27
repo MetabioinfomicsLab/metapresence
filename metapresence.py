@@ -135,7 +135,10 @@ def parseBam(list_of_genomes):
                 print('Warning: contig {} of sequence {} was not present in the fasta file(s). Skipping sequence...'.format(contig,seq,seq)) if not args.quiet else None
                 genome_readcount=0
                 break
-            genome_change=[0]*contigs_lengths_d[contig] 
+            contig_length=contigs_lengths_d[contig]
+            total_depth=0
+            covered_bases=0
+            covered_end=0
             rn=0 
             pair_taken=set()
             try:
@@ -148,14 +151,14 @@ def parseBam(list_of_genomes):
                         pair_taken.add(read.query_name)                                              
                     else:                                                                   
                         allpositions2.append(start_pos+genome_pointer)                            
-                    if start_pos<len(genome_change):
-                        genome_change[start_pos]+=1
-                    else:
-                        continue
-                    if end_pos<len(genome_change):
-                        genome_change[end_pos]-=1
-                    else:
-                        continue
+                    # Reads arrive in coordinate order. Retain the original
+                    # query-length intervals, including clipping at the contig end.
+                    if start_pos<contig_length:
+                        end_pos=min(end_pos,contig_length)
+                        total_depth+=end_pos-start_pos
+                        if end_pos>covered_end:
+                            covered_bases+=end_pos-max(start_pos,covered_end)
+                            covered_end=end_pos
             except ValueError:
                 pass
             genome_pointer+=contigs_lengths_d[contig] 
@@ -169,16 +172,8 @@ def parseBam(list_of_genomes):
                 else:
                     genome_covbases_lengths[seq]=[contigs_lengths_d[contig],contigs_lengths_d[contig],0]
                     continue
-            # calculate contig depth
-            current_coverage=0
-            total_depth=0
-            zerodepth=0
-            for position in range(contigs_lengths_d[contig]): # iterate over the genome change list to calculate: 
-                current_coverage=current_coverage+genome_change[position]
-                if current_coverage==0:
-                    zerodepth+=1                              # the positions with zero depth
-                    continue
-                total_depth+=current_coverage                 # the sum of all the per-base depths to calculate the average coverage            
+            # Depth is the sum of interval lengths; breadth is their union.
+            zerodepth=contig_length-covered_bases
             if seq in genome_covbases_lengths:
                 genome_covbases_lengths[seq][0]+=zerodepth
                 genome_covbases_lengths[seq][1]+=contigs_lengths_d[contig]
@@ -196,7 +191,7 @@ def parseBam(list_of_genomes):
         window_size=round(genome_covbases_lengths[seq][1]/(len(allpositions)))
         if window_size>0:
             distances=np.array(allpositions[1:])-np.array(allpositions[:-1])
-            hist=np.histogram(distances,bins=range(window_size,np.max(distances)+1))[0]
+            hist=np.histogram(distances,bins=np.arange(window_size,np.max(distances)+1))[0]
             frequency=hist/(len(allpositions)-1)
             gennext_read_ratio=(window_size-(np.sum(frequency*np.arange(len(frequency)))))/window_size
         else:
@@ -205,7 +200,7 @@ def parseBam(list_of_genomes):
             window_size=round(genome_covbases_lengths[seq][1]/(len(allpositions2)))
             if window_size>0:
                 distances=np.array(allpositions2[1:])-np.array(allpositions2[:-1])
-                hist,edges=np.histogram(distances,bins=range(window_size,np.max(distances)+1))
+                hist,edges=np.histogram(distances,bins=np.arange(window_size,np.max(distances)+1))
                 frequency=hist/(len(allpositions2)-1)
                 gennext_read_ratio2=(window_size-(np.sum(frequency*np.arange(len(frequency)))))/window_size
             else:
